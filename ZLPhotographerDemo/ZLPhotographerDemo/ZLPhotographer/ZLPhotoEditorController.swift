@@ -24,6 +24,7 @@ class ZLPhotoEditorController: UIViewController {
     fileprivate weak var navigationSaveButton: UIButton!
     
     fileprivate weak var controlView: UIView!
+    fileprivate weak var filtersCollectionView: UICollectionView!
     
     fileprivate weak var contentView: TouchView!
     fileprivate weak var contentImageView: UIImageView!
@@ -32,8 +33,24 @@ class ZLPhotoEditorController: UIViewController {
     
     weak var delegate: ZLPhotoEditorControllerDelegate?
     
+    // MARK: Effect Data
+    
+    fileprivate lazy var originalThumbImage: UIImage = {
+        return ZLPhotographerTool.resize(image: self.originalImage, to: FilterCell.size)
+    } ()
+    fileprivate var filteredThumbImages: [String: UIImage] = [:]
+    fileprivate var selectedFilterIndex: Int = 0
+    fileprivate lazy var filterContext: CIContext = { return CIContext() } ()
+    fileprivate lazy var filterDataSource: [(title: String, name: String)] = {
+        var filters = ZLPhotographer.filterNames
+        filters.insert((title: "原图", name: ""), at: 0)
+        filters.insert((title: "自动", name: "auto"), at: 1)
+        return filters
+    } ()
+    
     // MARK: Property
     
+    var originalImage: UIImage = UIImage()
     var contentImage: UIImage = UIImage() {
         didSet (image) {
             self.reloadContentImageView()
@@ -48,6 +65,7 @@ class ZLPhotoEditorController: UIViewController {
     fileprivate var latestOperationComplete: Bool = true
     
     fileprivate var isInited: Bool = false
+    fileprivate var isImageGenerating: Bool = false
     fileprivate var contentScale: CGFloat {
         if !self.isInited || self.contentImage.size.width == 0 || self.contentImage.size.height == 0 {
             return 1.0
@@ -114,6 +132,21 @@ class ZLPhotoEditorController: UIViewController {
             return view
         } ()
         
+        self.filtersCollectionView = {
+            let flowLayout = UICollectionViewFlowLayout()
+            flowLayout.scrollDirection = .horizontal
+            let collectionView = UICollectionView(
+                frame: CGRect(x: 0, y: 0, width: self.controlView.frame.size.width, height: self.controlView.frame.size.height),
+                collectionViewLayout: flowLayout)
+            collectionView.backgroundColor = UIColor.white
+            collectionView.showsHorizontalScrollIndicator = false
+            collectionView.register(FilterCell.self, forCellWithReuseIdentifier: FilterCell.identifier)
+            collectionView.dataSource = self
+            collectionView.delegate = self
+            self.controlView.addSubview(collectionView)
+            return collectionView
+        } ()
+        
         self.contentView = {
             let height = self.controlView.frame.minY - self.navigationView.frame.maxY
             let view = TouchView()
@@ -126,8 +159,6 @@ class ZLPhotoEditorController: UIViewController {
         
         self.contentImageView = {
             let imageView = UIImageView()
-            imageView.layer.borderColor = UIColor.white.cgColor
-            imageView.layer.borderWidth = 1
             imageView.layer.masksToBounds = true
             self.contentView.addSubview(imageView)
             return imageView
@@ -135,6 +166,27 @@ class ZLPhotoEditorController: UIViewController {
         
         self.isInited = true
         self.reloadContentImageView()
+        self.generateFilteredThumbImages()
+    }
+    
+    func generateFilteredThumbImages() {
+        let thumbImage = self.originalThumbImage
+        DispatchQueue(label: "ZLPhotoEditor.Filter").async { [weak self] in
+            for model in self?.filterDataSource ?? [] {
+                if model.name == "" {
+                    self?.filteredThumbImages[model.name] = thumbImage
+                } else if model.name == "auto" {
+                    self?.filteredThumbImages[model.name] = ZLPhotographerTool.getAutoFilteredImage(from: thumbImage, context: self?.filterContext)
+                } else if model.name.hasPrefix("CIPhotoEffect") {
+                    self?.filteredThumbImages[model.name] = ZLPhotographerTool.getFilteredImage(from: thumbImage, filterName: model.name, context: self?.filterContext)
+                }
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.filtersCollectionView.reloadData()
+            }
+        }
+        
+        
     }
     
     func reloadContentImageView() {
@@ -176,11 +228,189 @@ extension ZLPhotoEditorController {
         _ = self.navigationController?.popViewController(animated: true)
     }
     
+    
 }
 
 
 
-// MARK: - Brush
+// MARK: - Filter
+
+extension ZLPhotoEditorController {
+    
+    func filterImageWithAutoFilters() {
+        self.isImageGenerating = true
+        UIApplication.shared.isNetworkActivityIndicatorVisible = true
+        let image = self.originalImage
+        DispatchQueue(label: "ZLPhotoEditor.Filter", attributes: .concurrent).async {
+            let resultImage = ZLPhotographerTool.getAutoFilteredImage(from: image, context: self.filterContext)
+            DispatchQueue.main.async { [weak self] in
+                self?.contentImage = resultImage
+                UIApplication.shared.isNetworkActivityIndicatorVisible = false
+                self?.isImageGenerating = false
+            }
+        }
+    }
+    
+    func filterImage(filterName: String) {
+        self.isImageGenerating = true
+        UIApplication.shared.isNetworkActivityIndicatorVisible = true
+        let image = self.originalImage
+        DispatchQueue(label: "ZLPhotoEditor.Filter", attributes: .concurrent).async {
+            let resultImage = ZLPhotographerTool.getFilteredImage(from: image, filterName: filterName, context: self.filterContext)
+            DispatchQueue.main.async { [weak self] in
+                self?.contentImage = resultImage
+                UIApplication.shared.isNetworkActivityIndicatorVisible = false
+                self?.isImageGenerating = false
+            }
+        }
+    }
+}
+
+
+
+// MARK: - Protocol - Collection View
+
+extension ZLPhotoEditorController: UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
+    
+    fileprivate class FilterCell: UICollectionViewCell {
+        
+        static let identifier: String = "ZLPhotoEditor.FilterCell"
+        static let size: CGSize = CGSize(width: 80, height: 80)
+        
+        var contentImageView: UIImageView!
+        var contentLabel: UILabel!
+        var selectionMark: UIImageView!
+        
+        private var filterName: String = "not initialized"
+        
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            self.constructViews()
+        }
+        
+        required init?(coder aDecoder: NSCoder) {
+            super.init(coder: aDecoder)
+            self.constructViews()
+        }
+        
+        func constructViews() {
+            let size = FilterCell.size
+            
+            self.contentImageView = {
+                let imageView = UIImageView()
+                imageView.frame = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+                imageView.contentMode = .scaleAspectFill
+                imageView.layer.masksToBounds = true
+                imageView.layer.borderColor = UIColor.black.cgColor
+                imageView.layer.borderWidth = 1
+                self.addSubview(imageView)
+                return imageView
+            } ()
+            
+            self.contentLabel = {
+                let height = CGFloat(24)
+                let label = UILabel()
+                label.frame = CGRect(x: 0, y: size.height - height, width: size.width, height: height)
+                label.font = UIFont.systemFont(ofSize: 14)
+                label.textColor = UIColor.white
+                label.textAlignment = .center
+                label.numberOfLines = 0
+                self.addSubview(label)
+                return label
+            } ()
+            
+            self.selectionMark = {
+                let imageView = UIImageView()
+                imageView.frame = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+                imageView.contentMode = .scaleAspectFill
+                imageView.layer.masksToBounds = true
+                imageView.layer.borderColor = UIColor.lightGray.cgColor
+                imageView.layer.borderWidth = 5
+                imageView.isHidden = true
+                self.addSubview(imageView)
+                return imageView
+            } ()
+        }
+        
+        func fill(title: String, image: UIImage?, isSelected: Bool) {
+            self.contentLabel.text = title
+            self.contentImageView.image = image
+            self.selectionMark.isHidden = !isSelected
+        }
+    }
+    
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        return 1
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return self.filterDataSource.count
+    }
+    
+    // layout
+    
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return FilterCell.size
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
+        return 8
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
+        return UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+    }
+    
+    // cell
+    
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FilterCell.identifier, for: indexPath)
+        return cell
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard let cell = cell as? FilterCell else {
+            return
+        }
+        
+        let model = self.filterDataSource[indexPath.item]
+        let image = self.filteredThumbImages[model.name] ?? self.originalThumbImage
+        cell.fill(title: model.title, image: image, isSelected: (self.selectedFilterIndex == indexPath.item))
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        
+        // content image is locked for previous operation.
+        if self.isImageGenerating {
+            return
+        }
+        
+        // duplication check
+        if self.selectedFilterIndex == indexPath.item {
+            return
+        }
+        self.selectedFilterIndex = indexPath.item
+        
+        // filter image
+        let model = self.filterDataSource[indexPath.item]
+        if model.name == "" {
+            self.contentImage = self.originalImage
+        } else if model.name == "auto" {
+            self.filterImageWithAutoFilters()
+        } else if model.name.hasPrefix("CIPhotoEffect") {
+            self.filterImage(filterName: model.name)
+        }
+        
+        // reload collection view
+        collectionView.reloadData()
+    }
+    
+}
+
+
+
+// MARK: - Protocol - Brush
 
 extension ZLPhotoEditorController: TouchViewDelegate {
     

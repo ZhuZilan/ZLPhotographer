@@ -54,6 +54,61 @@ extension ZLPhotographerTool {
 
 extension ZLPhotographerTool {
     
+    static func resize(image: UIImage, to size: CGSize) -> UIImage {
+        let w = floor(size.width)
+        let h = floor(size.height)
+        UIGraphicsBeginImageContext(CGSize(width: w, height: h))
+        image.draw(in: CGRect(x: 0, y: 0, width: w, height: h))
+        let newImg = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return newImg ?? image
+    }
+    
+    static func getAutoFilteredImage(from image: UIImage, context: CIContext? = nil) -> UIImage {
+        guard var inputImage = CIImage(image: image) else {
+            return image
+        }
+        
+        let filters = inputImage.autoAdjustmentFilters()
+        if filters.count == 0 {
+            return image
+        }
+        
+        for filter in filters {
+            filter.setValue(inputImage, forKey: kCIInputImageKey)
+            inputImage = filter.outputImage ?? inputImage
+        }
+        
+        let context = context ?? CIContext()
+        guard let imageRef = context.createCGImage(inputImage, from: inputImage.extent) else {
+            return image
+        }
+        
+        return UIImage(cgImage: imageRef)
+    }
+    
+    static func getFilteredImage(from image: UIImage, filterName: String, context: CIContext? = nil) -> UIImage {
+        guard let inputImage = CIImage(image: image) else {
+            return image
+        }
+        
+        guard let filter = CIFilter(name: filterName) else {
+            return image
+        }
+        
+        filter.setValue(inputImage, forKey: kCIInputImageKey)
+        guard let outputImage = filter.outputImage else {
+            return image
+        }
+        
+        let context = context ?? CIContext()
+        guard let imageRef = context.createCGImage(outputImage, from: outputImage.extent) else {
+            return image
+        }
+        
+        return UIImage(cgImage: imageRef)
+    }
+    
     static func fixedOrientationImage(from image: UIImage) -> UIImage {
         if image.imageOrientation == .up {
             return image

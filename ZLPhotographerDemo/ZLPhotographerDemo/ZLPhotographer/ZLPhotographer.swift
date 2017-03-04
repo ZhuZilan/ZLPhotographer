@@ -48,6 +48,7 @@ class ZLPhotographer: UIViewController {
     var session: AVCaptureSession!
     fileprivate var input: AVCaptureDeviceInput!
     fileprivate var output: AVCaptureStillImageOutput!
+    fileprivate var videoOutput: AVCaptureVideoDataOutput!
     fileprivate var device: AVCaptureDevice? {
         let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo) as? [AVCaptureDevice] ?? []
         for device in devices {
@@ -298,7 +299,7 @@ extension ZLPhotographer {
             ldb("error constructing device input: \(error)")
             return false
         }
-        
+
         // configure still image output
         self.output = AVCaptureStillImageOutput()
         self.output.outputSettings = [AVVideoCodecKey: AVVideoCodecJPEG]
@@ -399,6 +400,7 @@ extension ZLPhotographer {
     func photographButtonDidTouchDown() {
         self.isHoldingPhotographButton = true
         self.takePhoto()
+//        self.takeShortVideo()
     }
     
     func photographButtonDidTouchCancel() {
@@ -480,13 +482,19 @@ extension ZLPhotographer {
 fileprivate extension ZLPhotographer {
     
     func takeShortVideo() {
-        let videoOutput = AVCaptureVideoDataOutput()
+        self.videoOutput = AVCaptureVideoDataOutput()
         if self.session.canAddOutput(videoOutput) {
             self.session.addOutput(videoOutput)
         }
         
         let videoQueue = DispatchQueue(label: "ZLPhotographer.VideoOutputQueue")
         videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
+        
+        let deadline = DispatchTime.now() + DispatchTimeInterval.milliseconds(Int(1000 * 3.0))
+        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+            guard let `self` = self else { return }
+            self.session.removeOutput(self.videoOutput)
+        }
     }
     
     /** Take photo with a continueous count greater or equal than 1. */
@@ -585,7 +593,13 @@ fileprivate extension ZLPhotographer {
 
 extension ZLPhotographer: AVCaptureVideoDataOutputSampleBufferDelegate {
     
+    func captureOutput(_ captureOutput: AVCaptureOutput!, didOutputSampleBuffer sampleBuffer: CMSampleBuffer!, from connection: AVCaptureConnection!) {
+        ldb("")
+    }
     
+    func captureOutput(_ captureOutput: AVCaptureOutput!, didDrop sampleBuffer: CMSampleBuffer!, from connection: AVCaptureConnection!) {
+        ldb("")
+    }
 }
 
 

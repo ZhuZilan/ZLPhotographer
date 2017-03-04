@@ -37,4 +37,17 @@ extension ZLPhotographer {
         }
     }
     
+    static let filterNames: [(title: String, name: String)] = {
+        return [
+            (title: "怀旧", name: "CIPhotoEffectInstant"),
+            (title: "黑白", name: "CIPhotoEffectNoir"),
+            (title: "色调", name: "CIPhotoEffectTonal"),
+            (title: "岁月", name: "CIPhotoEffectTransfer"),
+            (title: "单色", name: "CIPhotoEffectMono"),
+            (title: "褪色", name: "CIPhotoEffectFade"),
+            (title: "冲印", name: "CIPhotoEffectProcess"),
+            (title: "铬黄", name: "CIPhotoEffectChrome")
+        ]
+    } ()
+    
 }

@@ -187,6 +187,7 @@ extension ZLPhotoGalleryController {
         
         let image = self.models[self.selectedIndex]
         let controller = ZLPhotoEditorController()
+        controller.originalImage = image
         controller.contentImage = image
         controller.delegate = self
         self.navigationController?.pushViewController(controller, animated: true)
@@ -255,11 +256,11 @@ extension ZLPhotoGalleryController: UICollectionViewDataSource, UICollectionView
     }
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
-        return 0
+        return 4
     }
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
-        return 0
+        return 4
     }
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
