@@ -23,8 +23,15 @@ class ZLPhotoEditorController: UIViewController {
     fileprivate weak var navigationReturnButton: UIButton!
     fileprivate weak var navigationSaveButton: UIButton!
     
-    fileprivate weak var controlView: UIView!
-    fileprivate weak var filtersCollectionView: UICollectionView!
+    fileprivate var controlView: UIView!
+    fileprivate var controlBrushButton: UIButton!
+    fileprivate var controlFilterButton: UIButton!
+    
+    fileprivate var controlPanel: UIView!
+    fileprivate var controlPanelCommitButton: UIButton!
+    fileprivate var controlPanelCancelButton: UIView!
+    
+    fileprivate var filterCollectionView: UICollectionView!
     
     fileprivate weak var contentView: TouchView!
     fileprivate weak var contentImageView: UIImageView!
@@ -36,7 +43,7 @@ class ZLPhotoEditorController: UIViewController {
     // MARK: Effect Data
     
     fileprivate lazy var originalThumbImage: UIImage = {
-        return ZLPhotographerTool.resize(image: self.originalImage, to: FilterCell.size)
+        return ZLPhotographerTool.resize(image: self.originalImage, to: ThumbCell.size)
     } ()
     fileprivate var filteredThumbImages: [String: UIImage] = [:]
     fileprivate var selectedFilterIndex: Int = 0
@@ -57,6 +64,20 @@ class ZLPhotoEditorController: UIViewController {
         }
     }
     
+    fileprivate var editType: EditType = .none {
+        didSet (type) {
+            switch (type) {
+            case .none:
+                self.hideControlPanel()
+            case .brush:
+                self.showControlPanel()
+                // add brush collection view
+            case .filter:
+                self.showControlPanel()
+                self.controlView.addSubview(self.filterCollectionView)
+            }
+        }
+    }
     fileprivate var brushType: BrushType = .none        // brush type enumeration
     fileprivate var brushRadius: CGFloat = 20           // brush radius in pixel
     fileprivate var pixellateLevel: Int = 40
@@ -65,7 +86,6 @@ class ZLPhotoEditorController: UIViewController {
     fileprivate var latestOperationComplete: Bool = true
     
     fileprivate var isInited: Bool = false
-    fileprivate var isImageGenerating: Bool = false
     fileprivate var contentScale: CGFloat {
         if !self.isInited || self.contentImage.size.width == 0 || self.contentImage.size.height == 0 {
             return 1.0
@@ -123,8 +143,10 @@ class ZLPhotoEditorController: UIViewController {
             return button
         } ()
         
+        let controlSize = CGFloat(88)
+        
         self.controlView = {
-            let height = CGFloat(88)
+            let height = controlSize
             let view = UIView()
             view.backgroundColor = UIColor.white
             view.frame = CGRect(x: 0, y: screenHeight - height, width: screenWidth, height: height)
@@ -132,18 +154,71 @@ class ZLPhotoEditorController: UIViewController {
             return view
         } ()
         
-        self.filtersCollectionView = {
+        self.controlBrushButton = {
+            let button = UIButton(type: .custom)
+            button.frame = CGRect(x: 0, y: 0, width: controlSize, height: controlSize)
+            button.setImage(UIImage(named: "editor_brush_normal"), for: .normal)
+            button.setImage(UIImage(named: "editor_brush_selected"), for: .selected)
+            button.setImage(UIImage(named: "editor_brush_highlighted"), for: .highlighted)
+            button.addTarget(self, action: #selector(controlBrushButtonDidClick), for: .touchUpInside)
+            self.controlView.addSubview(button)
+            return button
+        } ()
+        
+        self.controlFilterButton = {
+            let button = UIButton(type: .custom)
+            button.frame = CGRect(x: controlSize, y: 0, width: controlSize, height: controlSize)
+            button.setImage(UIImage(named: "editor_filter_normal"), for: .normal)
+            button.setImage(UIImage(named: "editor_filter_selected"), for: .selected)
+            button.setImage(UIImage(named: "editor_filter_highlighted"), for: .highlighted)
+            button.addTarget(self, action: #selector(controlBrushButtonDidClick), for: .touchUpInside)
+            self.controlView.addSubview(button)
+            return button
+        } ()
+        
+        self.controlPanel = {
+            let view = UIView()
+            view.backgroundColor = UIColor.lightGray
+            view.frame = self.controlView.frame
+            self.view.addSubview(view)
+            return view
+        } ()
+        
+        self.controlPanelCancelButton = {
+            let button = UIButton(type: .custom)
+            button.frame = CGRect(x: 0, y: 0, width: controlSize, height: controlSize)
+            button.setImage(UIImage(named: "editor_brush_normal"), for: .normal)
+            button.setImage(UIImage(named: "editor_brush_selected"), for: .selected)
+            button.setImage(UIImage(named: "editor_brush_highlighted"), for: .highlighted)
+            button.addTarget(self, action: #selector(controlPanelCancelButtonDidClick), for: .touchUpInside)
+            self.controlPanel.addSubview(button)
+            return button
+        } ()
+        
+        self.controlPanelCommitButton = {
+            let button = UIButton(type: .custom)
+            button.frame = CGRect(x: screenWidth - controlSize, y: 0, width: controlSize, height: controlSize)
+            button.setImage(UIImage(named: "editor_brush_normal"), for: .normal)
+            button.setImage(UIImage(named: "editor_brush_selected"), for: .selected)
+            button.setImage(UIImage(named: "editor_brush_highlighted"), for: .highlighted)
+            button.addTarget(self, action: #selector(controlPanelCommitButtonDidClick), for: .touchUpInside)
+            self.controlPanel.addSubview(button)
+            return button
+        } ()
+        
+        self.filterCollectionView = {
             let flowLayout = UICollectionViewFlowLayout()
             flowLayout.scrollDirection = .horizontal
             let collectionView = UICollectionView(
-                frame: CGRect(x: 0, y: 0, width: self.controlView.frame.size.width, height: self.controlView.frame.size.height),
+                frame: CGRect(x: controlSize, y: 0, width: screenWidth - 2 * controlSize, height: controlSize),
                 collectionViewLayout: flowLayout)
             collectionView.backgroundColor = UIColor.white
             collectionView.showsHorizontalScrollIndicator = false
-            collectionView.register(FilterCell.self, forCellWithReuseIdentifier: FilterCell.identifier)
+            collectionView.register(ThumbCell.self, forCellWithReuseIdentifier: ThumbCell.identifier)
             collectionView.dataSource = self
             collectionView.delegate = self
-            self.controlView.addSubview(collectionView)
+            collectionView.layer.borderWidth = 3
+            collectionView.layer.borderColor = UIColor.blue.cgColor
             return collectionView
         } ()
         
@@ -166,6 +241,7 @@ class ZLPhotoEditorController: UIViewController {
         
         self.isInited = true
         self.reloadContentImageView()
+        self.hideControlPanel()
         self.generateFilteredThumbImages()
     }
     
@@ -182,7 +258,7 @@ class ZLPhotoEditorController: UIViewController {
                 }
             }
             DispatchQueue.main.async { [weak self] in
-                self?.filtersCollectionView.reloadData()
+                self?.filterCollectionView.reloadData()
             }
         }
         
@@ -228,7 +304,63 @@ extension ZLPhotoEditorController {
         _ = self.navigationController?.popViewController(animated: true)
     }
     
+    // control view buttons
     
+    func controlBrushButtonDidClick() {
+        self.editType = .brush
+    }
+    
+    func controlFilterButtonDidClick() {
+        self.editType = .filter
+    }
+    
+    // control panel buttons
+    
+    func controlPanelCommitButtonDidClick() {
+        if !self.latestOperationComplete {
+            return
+        }
+        
+        self.originalImage = self.contentImage
+        self.editType = .none
+    }
+    
+    func controlPanelCancelButtonDidClick() {
+        if !self.latestOperationComplete {
+            return
+        }
+        
+        self.contentImage = self.originalImage
+        self.editType = .none
+    }
+    
+}
+
+
+
+// MARK: - Control Panel Effect
+
+extension ZLPhotoEditorController {
+    
+    func showControlPanel() {
+        self.controlView.isHidden = true
+        self.controlPanel.isHidden = false
+    }
+    
+    func hideControlPanel() {
+        self.controlPanel.isHidden = true
+        self.controlView.isHidden = false
+        self.clearControlPanel()
+    }
+    
+    func clearControlPanel() {
+        for subview in self.controlPanel.subviews {
+            if subview == self.controlPanelCancelButton || subview == self.controlPanelCommitButton {
+                continue
+            }
+            subview.removeFromSuperview()
+        }
+    }
 }
 
 
@@ -238,7 +370,7 @@ extension ZLPhotoEditorController {
 extension ZLPhotoEditorController {
     
     func filterImageWithAutoFilters() {
-        self.isImageGenerating = true
+        self.latestOperationComplete = false
         UIApplication.shared.isNetworkActivityIndicatorVisible = true
         let image = self.originalImage
         DispatchQueue(label: "ZLPhotoEditor.Filter", attributes: .concurrent).async {
@@ -246,13 +378,13 @@ extension ZLPhotoEditorController {
             DispatchQueue.main.async { [weak self] in
                 self?.contentImage = resultImage
                 UIApplication.shared.isNetworkActivityIndicatorVisible = false
-                self?.isImageGenerating = false
+                self?.latestOperationComplete = true
             }
         }
     }
     
     func filterImage(filterName: String) {
-        self.isImageGenerating = true
+        self.latestOperationComplete = false
         UIApplication.shared.isNetworkActivityIndicatorVisible = true
         let image = self.originalImage
         DispatchQueue(label: "ZLPhotoEditor.Filter", attributes: .concurrent).async {
@@ -260,7 +392,7 @@ extension ZLPhotoEditorController {
             DispatchQueue.main.async { [weak self] in
                 self?.contentImage = resultImage
                 UIApplication.shared.isNetworkActivityIndicatorVisible = false
-                self?.isImageGenerating = false
+                self?.latestOperationComplete = true
             }
         }
     }
@@ -272,9 +404,9 @@ extension ZLPhotoEditorController {
 
 extension ZLPhotoEditorController: UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
     
-    fileprivate class FilterCell: UICollectionViewCell {
+    fileprivate class ThumbCell: UICollectionViewCell {
         
-        static let identifier: String = "ZLPhotoEditor.FilterCell"
+        static let identifier: String = "ZLPhotoEditor.ThumbCell"
         static let size: CGSize = CGSize(width: 80, height: 80)
         
         var contentImageView: UIImageView!
@@ -294,7 +426,7 @@ extension ZLPhotoEditorController: UICollectionViewDataSource, UICollectionViewD
         }
         
         func constructViews() {
-            let size = FilterCell.size
+            let size = ThumbCell.size
             
             self.contentImageView = {
                 let imageView = UIImageView()
@@ -350,7 +482,7 @@ extension ZLPhotoEditorController: UICollectionViewDataSource, UICollectionViewD
     // layout
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        return FilterCell.size
+        return ThumbCell.size
     }
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
@@ -364,12 +496,12 @@ extension ZLPhotoEditorController: UICollectionViewDataSource, UICollectionViewD
     // cell
     
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FilterCell.identifier, for: indexPath)
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ThumbCell.identifier, for: indexPath)
         return cell
     }
     
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        guard let cell = cell as? FilterCell else {
+        guard let cell = cell as? ThumbCell else {
             return
         }
         
@@ -382,7 +514,7 @@ extension ZLPhotoEditorController: UICollectionViewDataSource, UICollectionViewD
         collectionView.deselectItem(at: indexPath, animated: true)
         
         // content image is locked for previous operation.
-        if self.isImageGenerating {
+        if !self.latestOperationComplete {
             return
         }
         
@@ -465,6 +597,10 @@ extension ZLPhotoEditorController: TouchViewDelegate {
     }
     
     private func executeTouch(at point: CGPoint) {
+        if self.editType != .brush {
+            return
+        }
+        
         if !self.latestOperationComplete {
             return
         }
@@ -486,6 +622,12 @@ fileprivate extension ZLPhotoEditorController {
     enum BrushType {
         case none
         case pixellate
+    }
+    
+    enum EditType {
+        case none
+        case brush
+        case filter
     }
     
     class TouchView: UIView {
